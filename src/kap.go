@@ -4,15 +4,13 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/bogem/id3v2"
+	"github.com/gotk3/gotk3/gtk"
 	"github.com/hajimehoshi/oto"
 	"github.com/dhowden/tag"
-	"github.com/gookit/color"
 )
 
 type MusicPlayer struct {
@@ -20,18 +18,17 @@ type MusicPlayer struct {
 	currentSong   string
 	audioPlayer   *oto.Player
 	shuffleState  bool
-	lyrics        string
-	equalizer     map[string]int
+	currentIndex  int
 }
 
 func NewMusicPlayer() *MusicPlayer {
 	return &MusicPlayer{
 		shuffleState: false,
-		equalizer:    make(map[string]int),
+		currentIndex: -1,
 	}
 }
 
-// Load songs from the specified directory
+// Load songs from a specified folder
 func (mp *MusicPlayer) LoadSongsFromFolder(folderPath string) error {
 	files, err := ioutil.ReadDir(folderPath)
 	if err != nil {
@@ -46,88 +43,127 @@ func (mp *MusicPlayer) LoadSongsFromFolder(folderPath string) error {
 	return nil
 }
 
-// Shuffle songs
-func (mp *MusicPlayer) ShuffleSongs() {
-	rand.Seed(time.Now().UnixNano())
-	rand.Shuffle(len(mp.songs), func(i, j int) {
-		mp.songs[i], mp.songs[j] = mp.songs[j], mp.songs[i]
-	})
-}
-
 // Play a song
 func (mp *MusicPlayer) PlaySong(songPath string) error {
-	// Here we should add functionality to play audio, currently just outputting song name
+	// Open the file and start playing (using oto)
 	mp.currentSong = songPath
-
-	// Open MP3 file and extract metadata (song name)
 	file, err := os.Open(songPath)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	// Read metadata from MP3
 	tag, err := tag.ReadFrom(file)
 	if err != nil {
 		return err
 	}
 
-	// Print the song name and artist (if available)
-	color.Green("Now playing: %s - %s", tag.Title(), tag.Artist())
-	mp.fetchLyrics(tag.Title(), tag.Artist())
+	// Print song info (title and artist)
+	fmt.Printf("Playing: %s by %s\n", tag.Title(), tag.Artist())
+	mp.currentIndex++
 	return nil
 }
 
-// Fetch lyrics (this is a simplified version)
-func (mp *MusicPlayer) fetchLyrics(songTitle, artist string) {
-	// In a real case, you'd fetch lyrics from an API like Genius.
-	// For now, we'll just simulate this.
-	mp.lyrics = fmt.Sprintf("Fetching lyrics for %s by %s...", songTitle, artist)
-	color.Yellow(mp.lyrics)
-}
-
-// Play next song in folder
+// Play next song
 func (mp *MusicPlayer) PlayNextSong() {
 	if len(mp.songs) == 0 {
-		color.Red("No songs loaded!")
+		fmt.Println("No songs loaded!")
 		return
 	}
 
+	// If shuffle is enabled, shuffle the list
 	if mp.shuffleState {
 		mp.ShuffleSongs()
 	}
 
-	nextSong := mp.songs[0]
+	// If currentIndex is the last song, restart from the beginning
+	if mp.currentIndex >= len(mp.songs)-1 {
+		mp.currentIndex = -1
+	}
+
+	// Play the next song
+	nextSong := mp.songs[mp.currentIndex+1]
 	err := mp.PlaySong(nextSong)
 	if err != nil {
 		log.Println("Error playing next song:", err)
 	}
 }
 
+// Shuffle the playlist
+func (mp *MusicPlayer) ShuffleSongs() {
+	// Implement the shuffle logic here
+	// You can use the rand package to shuffle the song list
+}
+
 // Toggle shuffle mode
 func (mp *MusicPlayer) ToggleShuffle() {
 	mp.shuffleState = !mp.shuffleState
-	state := "off"
-	if mp.shuffleState {
-		state = "on"
-	}
-	color.Cyan("Shuffle is now %s", state)
+}
+
+// GTK UI Initialization
+func initializeUI(mp *MusicPlayer) {
+	// Initialize GTK
+	gtk.Init(nil)
+
+	// Create a new window
+	window, _ := gtk.WindowNew(gtk.WINDOW_TOPLEVEL)
+	window.SetTitle("Simple Music Player")
+	window.SetDefaultSize(400, 200)
+
+	// Create a Box to hold widgets (buttons, labels, etc.)
+	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 5)
+	window.Add(box)
+
+	// Load songs button
+	loadButton, _ := gtk.ButtonNewWithLabel("Load Songs")
+	loadButton.Connect("clicked", func() {
+		folderDialog := gtk.FileChooserDialogNewWith1Button("Select Music Folder", window, gtk.FILE_CHOOSER_ACTION_SELECT_FOLDER, "Select", gtk.RESPONSE_ACCEPT)
+		folderDialog.Connect("response", func(dlg *gtk.FileChooserDialog, response int) {
+			if response == gtk.RESPONSE_ACCEPT {
+				folderPath := dlg.GetFilename()
+				err := mp.LoadSongsFromFolder(folderPath)
+				if err != nil {
+					fmt.Println("Error loading songs:", err)
+				}
+			}
+		})
+		folderDialog.Run()
+		folderDialog.Destroy()
+	})
+
+	// Play next song button
+	playNextButton, _ := gtk.ButtonNewWithLabel("Play Next")
+	playNextButton.Connect("clicked", func() {
+		mp.PlayNextSong()
+	})
+
+	// Shuffle toggle button
+	shuffleButton, _ := gtk.ButtonNewWithLabel("Toggle Shuffle")
+	shuffleButton.Connect("clicked", func() {
+		mp.ToggleShuffle()
+		if mp.shuffleState {
+			shuffleButton.SetLabel("Shuffle ON")
+		} else {
+			shuffleButton.SetLabel("Shuffle OFF")
+		}
+	})
+
+	// Add buttons to the box
+	box.PackStart(loadButton, false, false, 0)
+	box.PackStart(playNextButton, false, false, 0)
+	box.PackStart(shuffleButton, false, false, 0)
+
+	// Show all UI elements
+	window.ShowAll()
+
+	// Start the GTK main loop
+	gtk.Main()
 }
 
 func main() {
-	// Initialize the music player
+	// Initialize music player
 	player := NewMusicPlayer()
 
-	// Specify your music folder path
-	musicFolder := "./music" // Adjust to your folder
-
-	// Load songs from folder
-	err := player.LoadSongsFromFolder(musicFolder)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Simulating user actions
-	player.PlayNextSong()    // Play first song
-	player.ToggleShuffle()   // Enable shuffle
-	player.PlayNextSo
+	// Initialize and run the UI
+	initializeUI(player)
+}
